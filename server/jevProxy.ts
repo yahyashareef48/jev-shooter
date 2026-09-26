@@ -60,6 +60,16 @@ export function validate(body: unknown): string | null {
   return null;
 }
 
+/** One line per decision batch, e.g. `[jev] live 14q 402ms 200 · chase 6 flank 7 retreat 1`. */
+function logBatch(mode: string, questions: number, status: number, ms: number, answers?: unknown, err?: string) {
+  const tally: Record<string, number> = {};
+  for (const a of Object.values((answers ?? {}) as Record<string, { choice?: string }>)) {
+    if (a?.choice) tally[a.choice] = (tally[a.choice] ?? 0) + 1;
+  }
+  const picks = Object.entries(tally).map(([k, v]) => `${k} ${v}`).join(' ');
+  console.log(`[jev] ${mode} ${questions}q ${ms}ms ${status}${picks ? ` · ${picks}` : ''}${err ? ` · ${err}` : ''}`);
+}
+
 export function jevProxy(opts: JevProxyOptions): Plugin {
   const timeoutMs = opts.timeoutMs ?? 5000;
   const hasKey = !!opts.apiKey?.trim();
@@ -84,7 +94,9 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
     const started = Date.now();
     if (body.mock || !hasKey) {
       await new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
-      return send(res, 200, { ...mockDecide(body.request), latencyMs: Date.now() - started, mode: 'mock' });
+      const mock = mockDecide(body.request);
+      logBatch('mock', Object.keys(body.request.questions).length, 200, Date.now() - started, mock.answers);
+      return send(res, 200, { ...mock, latencyMs: Date.now() - started, mode: 'mock' });
     }
 
     const ctrl = new AbortController();
@@ -97,10 +109,13 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
         signal: ctrl.signal,
       });
       const text = await upstream.text();
+      const nq = Object.keys(body.request.questions).length;
       if (!upstream.ok) {
+        logBatch('live', nq, upstream.status, Date.now() - started, undefined, text.slice(0, 160));
         return send(res, upstream.status, { error: `Jev ${upstream.status}: ${text.slice(0, 300)}` });
       }
       const data = JSON.parse(text) as { answers?: unknown; usage?: unknown; model?: string };
+      logBatch('live', nq, 200, Date.now() - started, data.answers);
       return send(res, 200, {
         answers: data.answers ?? {},
         usage: data.usage,
@@ -110,6 +125,7 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
       });
     } catch (e) {
       const aborted = e instanceof Error && e.name === 'AbortError';
+      logBatch('live', Object.keys(body.request.questions).length, aborted ? 504 : 502, Date.now() - started, undefined, (e as Error).message);
       return send(res, aborted ? 504 : 502, { error: aborted ? 'Jev timed out' : `proxy error: ${(e as Error).message}` });
     } finally {
       clearTimeout(timer);
