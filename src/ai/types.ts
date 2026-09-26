@@ -5,6 +5,10 @@ export type Intent = (typeof INTENTS)[number];
 
 export type EnemyType = 'drone' | 'gunner' | 'brute';
 
+/** Movement tactics Jev can pick when it pilots the player. */
+export const PLAYER_MOVES = ['advance', 'strafe_left', 'strafe_right', 'retreat', 'take_cover', 'dash_away'] as const;
+export type PlayerMove = (typeof PLAYER_MOVES)[number];
+
 /** Who made an enemy's current decision. */
 export type DecisionSource = 'jev' | 'mock' | 'fallback';
 
@@ -30,6 +34,7 @@ export interface WorldSnapshot {
     speed: number;
     strafing: boolean;
     recentlyDashed: boolean;
+    dashReady?: boolean;
   };
   enemies: EnemySnapshot[];
   pillars: { x: number; z: number; r: number }[];

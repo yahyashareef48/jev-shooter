@@ -9,7 +9,25 @@ import {
   heatBucket,
   movementBucket,
 } from './buckets';
-import type { ChoiceQuestion, DecideRequest, EnemyType, Intent, WorldSnapshot } from './types';
+import type { ChoiceQuestion, DecideRequest, EnemyType, Intent, PlayerMove, WorldSnapshot } from './types';
+
+/** Question ids used when Jev also pilots the player. Enemy ids look like `e12`, so no clash. */
+export const PILOT_MOVE_Q = 'player_move';
+export const PILOT_TARGET_Q = 'player_target';
+
+const PILOT_INSTRUCTIONS =
+  'You are now piloting the PLAYER (state.player) against this squad. Goal: survive and kill every enemy. ' +
+  'Use cover when hurt or when the weapon is overheated, dash only to escape point-blank danger, ' +
+  'circle-strafe ranged gunners, and never let flankers get behind you.';
+
+const MOVE_CRITERIA: Record<PlayerMove, string> = {
+  advance: 'Push toward the target to finish it off',
+  strafe_left: 'Circle-strafe to the left around the target while shooting',
+  strafe_right: 'Circle-strafe to the right around the target while shooting',
+  retreat: 'Back away from the nearest threats while shooting',
+  take_cover: 'Move behind a pillar to break line of sight, heal up and let the gun cool',
+  dash_away: 'Dash out of immediate danger (only when dash is ready and enemies are point-blank)',
+};
 
 const CRITERIA: Record<EnemyType, Record<Intent, string>> = {
   drone: {
@@ -42,40 +60,54 @@ export interface BuiltRequest {
   ids: string[];
 }
 
-export function buildRequest(world: WorldSnapshot, maxBatch: number): BuiltRequest {
+export interface BuildOptions {
+  /** Also ask Jev how to move the player and whom to shoot. */
+  pilot?: boolean;
+}
+
+export function buildRequest(world: WorldSnapshot, maxBatch: number, opts: BuildOptions = {}): BuiltRequest {
   const p = world.player;
   const sorted = [...world.enemies].sort((a, b) => dist(a.pos, p.pos) - dist(b.pos, p.pos));
   const batch = sorted.slice(0, maxBatch);
   const allPos = world.enemies.map((e) => e.pos);
 
   const count = (i: Intent) => world.enemies.filter((e) => e.intent === i).length;
+  const enemyEntries = batch.map((e, rank) => {
+    const los = hasLineOfSight(e.pos, p.pos, world.pillars);
+    return {
+      id: e.id,
+      type: e.type,
+      closeness_rank: rank + 1,
+      health: healthBucket(e.hp / e.maxHp),
+      distance: distanceBucket(dist(e.pos, p.pos)),
+      position: bearingBucket(p.pos, p.facing, e.pos),
+      in_cover: !los,
+      current_tactic: e.intent,
+      allies_nearby: alliesBucket(e.pos, allPos),
+    };
+  });
+
+  const player: Record<string, string | boolean> = {
+    health: healthBucket(p.hp / p.maxHp),
+    weapon: heatBucket(p.heat, p.overheated),
+    movement: movementBucket(p.speed, p.strafing, p.recentlyDashed),
+  };
+  if (opts.pilot) {
+    player.dash = p.dashReady ? 'ready' : 'recharging';
+    player.enemies_point_blank = enemyEntries.filter((e) => e.distance === 'point-blank').length > 0;
+    player.enemies_behind = enemyEntries.some((e) => e.position === 'behind the player');
+  }
+
   const state = {
     wave: world.wave,
-    player: {
-      health: healthBucket(p.hp / p.maxHp),
-      weapon: heatBucket(p.heat, p.overheated),
-      movement: movementBucket(p.speed, p.strafing, p.recentlyDashed),
-    },
+    player,
     squad: {
       alive: world.enemies.length,
       chasing: count('chase'),
       flanking: count('flank'),
       retreating: count('retreat'),
     },
-    enemies: batch.map((e, rank) => {
-      const los = hasLineOfSight(e.pos, p.pos, world.pillars);
-      return {
-        id: e.id,
-        type: e.type,
-        closeness_rank: rank + 1,
-        health: healthBucket(e.hp / e.maxHp),
-        distance: distanceBucket(dist(e.pos, p.pos)),
-        position: bearingBucket(p.pos, p.facing, e.pos),
-        in_cover: !los,
-        current_tactic: e.intent,
-        allies_nearby: alliesBucket(e.pos, allPos),
-      };
-    }),
+    enemies: enemyEntries,
   };
 
   const questions: Record<string, ChoiceQuestion> = {};
@@ -84,6 +116,18 @@ export function buildRequest(world: WorldSnapshot, maxBatch: number): BuiltReque
       type: 'choice',
       instructions: INSTRUCTIONS.replace('{id}', e.id),
       criteria: CRITERIA[e.type],
+    };
+  }
+  if (opts.pilot && batch.length) {
+    questions[PILOT_MOVE_Q] = { type: 'choice', instructions: PILOT_INSTRUCTIONS + ' Pick how the player moves next.', criteria: MOVE_CRITERIA };
+    const targets: Record<string, string> = {};
+    for (const e of enemyEntries) {
+      targets[e.id] = `${e.type}, ${e.health} health, ${e.distance}, ${e.position}, ${e.current_tactic}${e.in_cover ? ', in cover' : ''}`;
+    }
+    questions[PILOT_TARGET_Q] = {
+      type: 'choice',
+      instructions: PILOT_INSTRUCTIONS + ' Pick which enemy the player should shoot now: prefer the most dangerous one you can hit.',
+      criteria: targets,
     };
   }
   return { request: { state, questions }, ids: batch.map((e) => e.id) };

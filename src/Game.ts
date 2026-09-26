@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Director, type DecideFn } from './ai/director';
+import { Pilot } from './ai/pilot';
 import type { EnemyType, WorldSnapshot } from './ai/types';
 import { COLORS, PLAYER } from './core/config';
 import { Events } from './core/Events';
@@ -8,13 +9,14 @@ import { angleBetween } from './core/math';
 import { Enemy, resetEnemyIds } from './entities/Enemy';
 import { INTENT_COLOR } from './entities/EnemyTypes';
 import { Pickups } from './entities/Pickup';
-import { Player } from './entities/Player';
+import { manualControls, Player } from './entities/Player';
 import { ProjectileSystem } from './entities/Projectile';
 import { ThirdPersonCamera } from './entities/ThirdPersonCamera';
 import type { Glow } from './render/FloorMaterial';
 import { Renderer } from './render/Renderer';
 import { Sky } from './render/Sky';
 import { AudioSystem } from './systems/AudioSystem';
+import { Autopilot } from './systems/Autopilot';
 import { resolveCollisions } from './systems/CollisionSystem';
 import { CombatSystem } from './systems/CombatSystem';
 import { FxSystem } from './systems/FxSystem';
@@ -25,6 +27,8 @@ export type GameState = 'title' | 'playing' | 'paused' | 'over';
 
 const PICKUP_CHANCE = 0.15;
 const PICKUP_HEAL = 20;
+/** Seconds on the game-over screen before a Jev-piloted run restarts itself. */
+const PILOT_RESTART_DELAY = 7;
 
 export class Game {
   readonly events = new Events();
@@ -41,6 +45,9 @@ export class Game {
   readonly director: Director;
   readonly fx: FxSystem;
   readonly audio: AudioSystem;
+  /** Jev piloting the player (toggle with P). */
+  readonly pilot = new Pilot();
+  readonly autopilot: Autopilot;
   enemies: Enemy[] = [];
   state: GameState = 'title';
   time = 0;
@@ -52,6 +59,7 @@ export class Game {
   private playerGlow = new THREE.Color(COLORS.player);
   private pickupGlow = new THREE.Color().setRGB(0.3, 1.6, 0.6);
   private frameHooks: ((dt: number) => void)[] = [];
+  private overFor = 0;
 
   constructor(container: HTMLElement, decide: DecideFn, useMock: boolean) {
     this.gfx = new Renderer(container);
@@ -67,6 +75,16 @@ export class Game {
       () => this.time,
       (id, intent) => this.events.emit('intentChanged', { id, intent }),
       useMock,
+    );
+    this.director.pilot = this.pilot;
+    this.autopilot = new Autopilot(
+      this.pilot,
+      this.player,
+      this.cam,
+      this.gfx.camera,
+      () => this.enemies,
+      () => this.pickups.positions(),
+      this.arena.pillars,
     );
     this.fx = new FxSystem(this.events, () => this.player.pos);
     this.audio = new AudioSystem(this.events, () => this.player.pos);
@@ -91,7 +109,19 @@ export class Game {
     });
     document.addEventListener('pointerlockchange', () => {
       if (this.input.locked && this.state === 'paused') this.state = 'playing';
-      else if (!this.input.locked && this.state === 'playing') this.state = 'paused';
+      // While Jev pilots, releasing the mouse just switches to spectating.
+      else if (!this.input.locked && this.state === 'playing' && !this.pilot.enabled) this.state = 'paused';
+    });
+    addEventListener('keydown', (e) => {
+      if (e.code === 'KeyP') this.togglePilot();
+      // Esc only reaches us when the pointer is already free (spectating a Jev-piloted run).
+      if (e.code === 'Escape' && !this.input.locked && this.pilot.enabled) {
+        if (this.state === 'playing') this.state = 'paused';
+        else if (this.state === 'paused') this.state = 'playing';
+      }
+    });
+    this.events.on('enemyKilled', () => {
+      if (this.pilot.enabled) this.director.trigger(); // retarget soon
     });
     this.events.on('intentChanged', ({ id, intent }) => {
       const e = this.enemies.find((x) => x.id === id);
@@ -103,6 +133,18 @@ export class Game {
       this.state = 'over';
       this.input.unlock();
     });
+  }
+
+  /** Hand the player over to Jev, or take control back. */
+  togglePilot() {
+    this.pilot.enabled = !this.pilot.enabled;
+    if (this.pilot.enabled) {
+      if (this.state === 'title' || this.state === 'over') this.newRun();
+      if (this.state === 'paused') this.state = 'playing';
+      this.director.trigger();
+    } else if (this.state === 'playing' && !this.input.locked) {
+      this.state = 'paused'; // you need the mouse back to play
+    }
   }
 
   /** Register a per-frame callback (UI, FX, audio). */
@@ -158,6 +200,7 @@ export class Game {
         speed: p.speed,
         strafing: p.strafing,
         recentlyDashed: p.recentlyDashed,
+        dashReady: p.dashCooldown <= 0,
       },
       enemies: this.enemies.map((e) => ({
         id: e.id,
@@ -181,6 +224,8 @@ export class Game {
       this.hitStop -= rawDt;
       dt = rawDt * 0.05;
     }
+    this.overFor = this.state === 'over' ? this.overFor + rawDt : 0;
+    if (this.pilot.enabled && this.overFor > PILOT_RESTART_DELAY) this.newRun();
     const simulate = this.state === 'playing' || this.state === 'over';
     if (simulate) this.step(dt);
     else this.idle(rawDt);
@@ -212,9 +257,11 @@ export class Game {
     const playing = this.state === 'playing';
 
     const { dx, dy } = this.input.consumeMouse();
-    if (playing) this.cam.look(dx, dy);
+    const piloted = this.pilot.enabled && playing;
+    if (playing && !piloted) this.cam.look(dx, dy);
+    const controls = piloted ? this.autopilot.update(dt) : manualControls(this.input, this.cam.yaw);
 
-    this.player.update(dt, t, this.input, this.cam.yaw, this.cam.aimPoint, ({ from, dir }) => {
+    this.player.update(dt, t, controls, this.cam.yaw, this.cam.aimPoint, ({ from, dir }) => {
       this.projectiles.fire('player', from, dir, PLAYER.bulletSpeed, PLAYER.bulletDamage);
       this.events.emit('shot', { x: from.x, y: from.y, z: from.z });
     });

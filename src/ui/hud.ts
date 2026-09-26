@@ -29,6 +29,8 @@ export class Hud {
   private flanked = h('div.flanked', {}, h('span.flanked-chev', {}, '⟪'), h('span', {}, 'FLANKED'), h('span.flanked-chev', {}, '⟫'));
   private overheat = h('div.overheat', {}, 'OVERHEATED');
   private vignette = h('div.hurt-vignette');
+  private pilotTag = h('div.pilot-tag');
+  private reticle = h('div.pilot-reticle');
   private numbers: DamageNumber[] = [];
   private numberLayer = h('div.numbers');
   private hitT = 0;
@@ -70,7 +72,7 @@ export class Hud {
     const hp = h('div.hp', {}, h('div.hp-bar', {}, this.hpGhost, this.hpFill), this.hpText);
     const bottom = h('div.bottom', {}, hp, h('div.dash', {}, h('span.dash-label', {}, 'DASH'), this.dashPip));
 
-    this.root.append(this.vignette, top, center, bottom, this.banner, this.flanked, this.numberLayer);
+    this.root.append(this.vignette, this.reticle, top, this.pilotTag, center, bottom, this.banner, this.flanked, this.numberLayer);
 
     for (let i = 0; i < 40; i++) {
       const el = h('div.dmg');
@@ -151,6 +153,29 @@ export class Hud {
     this.flanked.classList.toggle('show', this.flankT > 0);
     this.bannerT = Math.max(0, this.bannerT - dt);
     if (this.bannerT === 0) this.banner.classList.remove('show');
+
+    // Jev pilot: what it decided and who it is shooting
+    const pilot = g.pilot;
+    this.pilotTag.classList.toggle('show', pilot.enabled);
+    if (pilot.enabled) {
+      const d = pilot.decision;
+      const target = g.autopilot.target;
+      this.pilotTag.replaceChildren(
+        h('span.pt-name', {}, 'JEV PILOT'),
+        h('span.pt-move', {}, d.move.replace('_', ' ')),
+        h('span.pt-arrow', {}, '→'),
+        h('span.pt-target', {}, target ? target.id : '—'),
+        h(`span.pt-src.${d.source}`, {}, d.source === 'fallback' ? 'local' : d.source),
+      );
+    }
+    const tgt = pilot.enabled && g.state === 'playing' ? g.autopilot.target : null;
+    if (tgt) this.tmp.copy(tgt.center).project(g.gfx.camera);
+    if (tgt && this.tmp.z < 1) {
+      const x = (this.tmp.x * 0.5 + 0.5) * innerWidth;
+      const y = (-this.tmp.y * 0.5 + 0.5) * innerHeight;
+      this.reticle.style.display = 'block';
+      this.reticle.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) rotate(${g.time * 90}deg)`;
+    } else this.reticle.style.display = 'none';
 
     // Floating damage numbers
     const cam = g.gfx.camera;

@@ -6,6 +6,30 @@ import { damp } from '../core/math';
 
 const hdr = (r: number, g: number, b: number) => new THREE.Color().setRGB(r, g, b);
 
+/** What the pilot (keyboard/mouse or Jev autopilot) wants this frame. `move` is world-space XZ. */
+export interface PlayerControls {
+  move: { x: number; z: number };
+  fire: boolean;
+  dash: boolean;
+}
+
+/** Map WASD/mouse/shift to controls relative to where the camera faces. */
+export function manualControls(input: Input, yaw: number): PlayerControls {
+  const fx = -Math.sin(yaw);
+  const fz = -Math.cos(yaw);
+  let x = 0;
+  let z = 0;
+  if (input.isDown('KeyW')) (x += fx), (z += fz);
+  if (input.isDown('KeyS')) (x -= fx), (z -= fz);
+  if (input.isDown('KeyD')) (x += -fz), (z += fx);
+  if (input.isDown('KeyA')) (x -= -fz), (z -= fx);
+  return {
+    move: { x, z },
+    fire: input.mouseDown,
+    dash: input.wasPressed('ShiftLeft') || input.wasPressed('ShiftRight') || input.wasPressed('Space'),
+  };
+}
+
 export interface FireRequest {
   from: THREE.Vector3;
   dir: THREE.Vector3;
@@ -103,22 +127,18 @@ export class Player {
     return this.muzzle.getWorldPosition(target);
   }
 
-  update(dt: number, time: number, input: Input, yaw: number, aimPoint: THREE.Vector3, fire: (r: FireRequest) => void) {
+  update(dt: number, time: number, controls: PlayerControls, yaw: number, aimPoint: THREE.Vector3, fire: (r: FireRequest) => void) {
     if (!this.alive) return;
     this.facing.set(-Math.sin(yaw), 0, -Math.cos(yaw));
     const right = new THREE.Vector3(-this.facing.z, 0, this.facing.x);
 
-    const wish = new THREE.Vector3();
-    if (input.isDown('KeyW')) wish.add(this.facing);
-    if (input.isDown('KeyS')) wish.sub(this.facing);
-    if (input.isDown('KeyD')) wish.add(right);
-    if (input.isDown('KeyA')) wish.sub(right);
-    if (wish.lengthSq() > 0) wish.normalize();
+    const wish = new THREE.Vector3(controls.move.x, 0, controls.move.z);
+    if (wish.lengthSq() > 1) wish.normalize();
     this.strafing = wish.lengthSq() > 0 && Math.abs(wish.dot(right)) > 0.6;
 
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     this.sinceDash += dt;
-    if ((input.wasPressed('ShiftLeft') || input.wasPressed('ShiftRight') || input.wasPressed('Space')) && this.dashCooldown <= 0) {
+    if (controls.dash && this.dashCooldown <= 0) {
       this.dashDir.copy(wish.lengthSq() > 0 ? wish : this.facing);
       this.dashTime = PLAYER.dashTime;
       this.dashCooldown = PLAYER.dashCooldown;
@@ -143,7 +163,7 @@ export class Player {
     if (this.overheated) {
       this.heat = Math.max(0, this.heat - PLAYER.heatCoolRate * 1.3 * dt);
       if (this.heat <= PLAYER.overheatRecover) this.overheated = false;
-    } else if (input.mouseDown && this.fireTimer <= 0) {
+    } else if (controls.fire && this.fireTimer <= 0) {
       this.fireTimer = 1 / PLAYER.fireRate;
       this.heat += PLAYER.heatPerShot;
       const from = this.muzzleWorld();
@@ -153,7 +173,7 @@ export class Player {
         this.overheated = true;
         this.events.emit('overheat', {});
       }
-    } else if (!input.mouseDown) {
+    } else if (!controls.fire) {
       this.heat = Math.max(0, this.heat - PLAYER.heatCoolRate * dt);
     }
 

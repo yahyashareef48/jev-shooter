@@ -5,7 +5,8 @@
 import { DIRECTOR } from '../core/config';
 import { angleBetween, dist, sub, type XZ } from '../core/math';
 import { fallbackDecide } from './fallbackBrain';
-import { buildRequest } from './stateBuilder';
+import type { Pilot } from './pilot';
+import { buildRequest, PILOT_MOVE_Q, PILOT_TARGET_Q } from './stateBuilder';
 import {
   INTENTS,
   type DecideRequest,
@@ -167,6 +168,8 @@ export function naturalSide(u: XZ, playerPos: XZ, facing: XZ): 1 | -1 {
 export class Director {
   useMock: boolean;
   enabled = true;
+  /** When set and enabled, the player's tactic rides along in the same batched call. */
+  pilot: Pilot | null = null;
   readonly stats: DirectorStats = {
     calls: 0,
     errors: 0,
@@ -230,13 +233,15 @@ export class Director {
     this.triggered = false;
     this.nextAt = now + DIRECTOR.interval;
 
+    const piloting = !!this.pilot?.enabled;
     if (!this.enabled || now < this.stats.backoffUntil) {
       this.stats.status = this.enabled ? 'error' : 'disabled';
       this.runFallback(units, world, units.map((u) => u.id), now);
+      if (piloting) this.pilot!.fallback(world, now);
       return;
     }
 
-    const { request, ids } = buildRequest(world, DIRECTOR.maxBatch);
+    const { request, ids } = buildRequest(world, DIRECTOR.maxBatch, { pilot: piloting });
     // Units beyond the batch cap are always handled locally.
     const extra = units.filter((u) => !ids.includes(u.id)).map((u) => u.id);
     if (extra.length) this.runFallback(units, world, extra, now);
@@ -277,8 +282,17 @@ export class Director {
         const units = this.getUnits();
         const map = new Map(units.map((u) => [u.id, u]));
         const before = new Map(units.map((u) => [u.id, u.intent]));
+
+        // Split off the player's answers; the rest belong to the squad.
+        const { [PILOT_MOVE_Q]: pilotMove, [PILOT_TARGET_Q]: pilotTarget, ...squadAnswers } = res.answers ?? {};
+        const source = res.mode === 'live' ? 'jev' : 'mock';
+        if (this.pilot?.enabled && (pilotMove || pilotTarget)) {
+          const alive = new Set(units.filter((u) => u.alive).map((u) => u.id));
+          this.pilot.applyAnswers(pilotMove, pilotTarget, world, alive, now, DIRECTOR.confidenceGate, source);
+        }
+
         const r = applyAnswers(
-          res,
+          { ...res, answers: squadAnswers },
           map,
           now,
           {
@@ -287,7 +301,7 @@ export class Director {
             switchMargin: DIRECTOR.switchMargin,
             maxShare: DIRECTOR.maxShare,
           },
-          res.mode === 'live' ? 'jev' : 'mock',
+          source,
         );
         s.jevDecisions += r.applied;
         s.staleDropped += r.stale;
@@ -306,6 +320,7 @@ export class Director {
         s.backoffUntil = this.clock() + this.backoff;
         const units = this.getUnits().filter((u) => u.alive);
         this.runFallback(units, world, units.map((u) => u.id), this.clock());
+        if (this.pilot?.enabled) this.pilot.fallback(world, this.clock());
       })
       .finally(() => {
         clearTimeout(timeout);

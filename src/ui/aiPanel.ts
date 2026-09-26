@@ -15,6 +15,7 @@ export class AiPanel {
   private stats = h('div.ai-stats');
   private spark = h('canvas.spark');
   private list = h('div.ai-list');
+  private pilotRow = h('div.pilot-row');
   private reqPre = h('pre');
   private resPre = h('pre');
   private open = true;
@@ -38,10 +39,11 @@ export class AiPanel {
       this.stats,
       h('div.spark-wrap', {}, h('div.spark-label', {}, 'latency'), this.spark),
       legend,
+      this.pilotRow,
       this.list,
       h('details.raw', {}, h('summary', {}, 'last request'), this.reqPre),
       h('details.raw', {}, h('summary', {}, 'last response'), this.resPre),
-      h('div.ai-keys', {}, h('kbd', {}, 'Tab'), ' panel  ', h('kbd', {}, 'J'), ' live / mock'),
+      h('div.ai-keys', {}, h('kbd', {}, 'Tab'), ' panel  ', h('kbd', {}, 'J'), ' live / mock  ', h('kbd', {}, 'P'), ' Jev pilot'),
     );
     addEventListener('keydown', (e) => {
       if (e.code === 'Tab') this.toggle();
@@ -82,7 +84,7 @@ export class AiPanel {
     );
     this.badge.title = s.lastError ?? '';
     this.root.classList.toggle('hidden', g.state === 'title');
-    this.root.classList.toggle('interactive', g.state !== 'playing');
+    this.root.classList.toggle('interactive', g.state !== 'playing' || !g.input.locked);
 
     if (s.calls !== this.lastCalls) {
       this.lastCalls = s.calls;
@@ -110,6 +112,20 @@ export class AiPanel {
       cell('gated', `${s.lowConfidence} low-conf · ${s.rebalanced} rebalanced`),
     );
     if (s.lastError && s.status === 'error') this.stats.append(h('div.ai-error', {}, s.lastError));
+
+    const pl = g.pilot;
+    this.pilotRow.classList.toggle('show', pl.enabled);
+    if (pl.enabled) {
+      const d = pl.decision;
+      const target = g.autopilot.target;
+      this.pilotRow.replaceChildren(
+        h('span.r-id', {}, '▲ you'),
+        h('span.chip.pilot', {}, d.move.replace('_', ' ')),
+        h('span.pilot-target', {}, `→ ${target ? target.id : '—'}${d.targetConfidence != null ? ` ${fmt.pct(d.targetConfidence)}` : ''}`),
+        h('span.r-conf', {}, d.moveConfidence != null ? fmt.pct(d.moveConfidence) : '—'),
+        h(`span.src.${d.source}`, {}, d.source === 'fallback' ? 'local' : d.source),
+      );
+    }
 
     const p = g.player.pos;
     const rows = [...g.enemies]

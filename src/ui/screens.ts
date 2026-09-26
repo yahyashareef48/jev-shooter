@@ -9,6 +9,7 @@ const CONTROLS: [string, string][] = [
   ['Shift / Space', 'dash'],
   ['Tab', 'AI panel'],
   ['J', 'live ↔ mock'],
+  ['P', 'Jev pilots you'],
   ['M', 'mute'],
   ['Esc', 'pause'],
 ];
@@ -45,6 +46,7 @@ export class Screens {
       ),
       modeLine,
       h('div.cta', {}, 'CLICK TO DEPLOY'),
+      h('div.pilot-hint', {}, 'or press ', h('kbd', {}, 'P'), ' to let Jev pilot you and watch it fight itself'),
       h('div.controls', {}, ...CONTROLS.map(([k, v]) => h('div.ctl', {}, h('kbd', {}, k), h('span', {}, v)))),
     );
     this.pause = h('div.screen.pause', {}, h('div.big', {}, 'PAUSED'), h('div.cta', {}, 'CLICK TO RESUME'));
@@ -81,7 +83,7 @@ export class Screens {
         stat('avg latency', d.avgLatency ? fmt.ms(d.avgLatency) : '—'),
         stat('cost', fmt.usd(d.costUsd)),
       ),
-      h('div.cta', {}, 'CLICK TO REDEPLOY'),
+      h('div.cta', {}, g.pilot.enabled ? 'JEV REDEPLOYS IN A MOMENT…' : 'CLICK TO REDEPLOY'),
     );
   }
 }

@@ -33,6 +33,7 @@ npm run dev               # http://localhost:5173
 | Shift / Space | dash (brief invulnerability) |
 | Tab | toggle the AI Director panel |
 | J | live ↔ mock Jev |
+| P | **Jev pilots you**: it plays both sides (also `?pilot` in the URL) |
 | M | mute |
 | Esc | pause |
 
@@ -62,6 +63,20 @@ Browser                                             Vite dev server
    - *chase* seeks the player, or holds firing range for gunners.
    - *flank* orbits in arcs of up to 50° toward a point 130° off the player's facing.
    - *retreat* heads for the far side of the best pillar and regenerates there.
+
+### Jev as the pilot (P)
+
+Press **P** (or open `/?pilot`) to let Jev fly the player too. It doesn't need a second call: two more questions ride along in the same batched request.
+
+- `player_move` picks one of `advance`, `strafe_left`, `strafe_right`, `retreat`, `take_cover` or `dash_away`.
+- `player_target` picks which enemy to shoot. Its options are the live enemy ids, each with a short description.
+
+Local reflexes in `src/systems/Autopilot.ts` then do the frame-by-frame work:
+- Turn the camera toward the target at a human-like speed.
+- Fire only when lined up with a visible target, and stop short of overheating the gun.
+- Steer around pillars and away from the wall, dash once per `dash_away` decision, and grab health orbs when hurt.
+
+If Jev isn't sure, a local pilot brain (`src/ai/pilot.ts`) fills in. Release the mouse (Esc) to watch while Jev plays. When a piloted run ends, it restarts itself after a few seconds.
 
 The **AI Director panel** (Tab) shows the mode, per-call latency with a sparkline, tokens, running cost, decision counts, and each enemy's chase/flank/retreat probability bar with its confidence and source. The last raw request and response JSON are there too; they can be expanded while the game is paused.
 
