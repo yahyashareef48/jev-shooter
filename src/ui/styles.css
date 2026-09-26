@@ -1,0 +1,15 @@
+:root {
+  --chase: #ff3b5c;
+  --flank: #ffb020;
+  --retreat: #33e1ff;
+  --ink: #e8f4ff;
+  --dim: #7d8ca3;
+  --panel: rgba(8, 12, 20, 0.72);
+  --line: rgba(120, 200, 255, 0.18);
+  --font-display: 'Orbitron', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #05060a; color: var(--ink); }
+#app, #app canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#ui { position: fixed; inset: 0; pointer-events: none; font-family: var(--font-mono); }
