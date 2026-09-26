@@ -33,6 +33,7 @@ const INSTRUCTIONS =
   'Pick the next tactic for enemy {id} (its entry is in state.enemies). ' +
   'Enemies share one goal: kill the player. Coordinate as a squad: not everyone should do the same thing; ' +
   'badly wounded units should survive to fight later; punish an overheated, low-health or distracted player; ' +
+  'the nearest units (low closeness_rank) should usually keep the pressure on while others flank; ' +
   'flank when the front is crowded; keep committed to a tactic unless the situation clearly changed.';
 
 export interface BuiltRequest {
@@ -61,11 +62,12 @@ export function buildRequest(world: WorldSnapshot, maxBatch: number): BuiltReque
       flanking: count('flank'),
       retreating: count('retreat'),
     },
-    enemies: batch.map((e) => {
+    enemies: batch.map((e, rank) => {
       const los = hasLineOfSight(e.pos, p.pos, world.pillars);
       return {
         id: e.id,
         type: e.type,
+        closeness_rank: rank + 1,
         health: healthBucket(e.hp / e.maxHp),
         distance: distanceBucket(dist(e.pos, p.pos)),
         position: bearingBucket(p.pos, p.facing, e.pos),

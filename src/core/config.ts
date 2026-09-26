@@ -47,6 +47,8 @@ export const DIRECTOR = {
   confidenceGate: 0.35,
   minCommit: 1.0,
   switchMargin: 0.25,
+  /** Squad-level caps applied on top of Jev's per-enemy answers. */
+  maxShare: { flank: 0.45, retreat: 0.5 } as Partial<Record<'chase' | 'flank' | 'retreat', number>>,
   backoffMin: 1,
   backoffMax: 8,
   requestTimeoutMs: 4000,

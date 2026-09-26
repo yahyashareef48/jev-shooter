@@ -1,15 +1,15 @@
 import './ui/styles.css';
-import type { DecideFn } from './ai/director';
+import { decideViaProxy, fetchStatus } from './ai/jevClient';
 import { Game } from './Game';
 
-// Placeholder until the Jev proxy lands: always fails, so the director uses the fallback brain.
-const decide: DecideFn = () => Promise.reject(new Error('Jev proxy not wired yet'));
-
-const game = new Game(document.getElementById('app')!, decide, false);
+const status = await fetchStatus();
+// Mock when forced via ?mock, or when there is no key to go live with.
+const forceMock = new URLSearchParams(location.search).has('mock');
+const game = new Game(document.getElementById('app')!, decideViaProxy, forceMock || !status.hasKey);
 game.start();
 game.gfx.renderer.domElement.addEventListener('click', () => {
   if (game.state !== 'playing') game.newRun();
   game.input.lock();
 });
 
-if (import.meta.env.DEV) (window as unknown as { game: Game }).game = game;
+if (import.meta.env.DEV) Object.assign(window, { game, jevStatus: status });

@@ -39,6 +39,7 @@ export interface DirectorStats {
   jevDecisions: number;
   fallbackDecisions: number;
   lowConfidence: number;
+  rebalanced: number;
   staleDropped: number;
   lastBatch: number;
   lastLatency: number;
@@ -57,6 +58,7 @@ export interface ApplyConfig {
   gate: number;
   minCommit: number;
   switchMargin: number;
+  maxShare?: Partial<Record<Intent, number>>;
 }
 
 export interface ApplyResult {
@@ -64,9 +66,50 @@ export interface ApplyResult {
   lowConfidence: string[];
   stale: number;
   changed: string[];
+  rebalanced: number;
 }
 
 const isIntent = (s: unknown): s is Intent => typeof s === 'string' && (INTENTS as readonly string[]).includes(s);
+
+interface Pending {
+  u: DirectedUnit;
+  choice: Intent;
+  probs: Partial<Record<Intent, number>>;
+  conf: number;
+}
+
+/**
+ * Jev answers each question independently, so a squad can all pick the same tactic.
+ * Cap flank/retreat to a share of the squad, demoting the units that wanted it least
+ * to their next-best option according to Jev's own probabilities.
+ */
+export function balanceSquad(
+  pending: Pending[],
+  aliveUnits: readonly DirectedUnit[],
+  maxShare: Partial<Record<Intent, number>>,
+): number {
+  let moved = 0;
+  const deciding = new Set(pending.map((p) => p.u.id));
+  const capped = new Set<Intent>();
+  for (const intent of INTENTS) {
+    const share = maxShare[intent];
+    if (share === undefined) continue;
+    const limit = Math.max(1, Math.floor(aliveUnits.length * share));
+    const keeping = aliveUnits.filter((u) => !deciding.has(u.id) && u.intent === intent).length;
+    const wanting = pending.filter((p) => p.choice === intent).sort((a, b) => (a.probs[intent] ?? 0) - (b.probs[intent] ?? 0));
+    let excess = keeping + wanting.length - limit;
+    capped.add(intent);
+    // Never demote into a tactic whose cap was already enforced.
+    const alt = INTENTS.filter((i) => !capped.has(i));
+    for (const p of wanting) {
+      if (excess <= 0 || !alt.length) break;
+      p.choice = alt.reduce((a, b) => ((p.probs[b] ?? 0) > (p.probs[a] ?? 0) ? b : a));
+      moved++;
+      excess--;
+    }
+  }
+  return moved;
+}
 
 /**
  * Apply one Jev response. Units that died since the request are counted stale.
@@ -81,7 +124,8 @@ export function applyAnswers(
   cfg: ApplyConfig,
   source: DecisionSource,
 ): ApplyResult {
-  const out: ApplyResult = { applied: 0, lowConfidence: [], stale: 0, changed: [] };
+  const out: ApplyResult = { applied: 0, lowConfidence: [], stale: 0, changed: [], rebalanced: 0 };
+  const pending: Pending[] = [];
   for (const [id, ans] of Object.entries(res.answers ?? {})) {
     const u = units.get(id);
     if (!u || !u.alive) {
@@ -95,12 +139,21 @@ export function applyAnswers(
       out.lowConfidence.push(id);
       continue;
     }
-    let choice: Intent = ans.choice;
+    pending.push({ u, choice: ans.choice, probs, conf });
+  }
+
+  if (cfg.maxShare) {
+    const alive = [...units.values()].filter((u) => u.alive);
+    out.rebalanced = balanceSquad(pending, alive, cfg.maxShare);
+  }
+
+  for (const { u, probs, conf, choice: wanted } of pending) {
+    let choice = wanted;
     if (choice !== u.intent && now - u.intentSince < cfg.minCommit) {
       const margin = (probs[choice] ?? 1) - (probs[u.intent] ?? 0);
       if (margin < cfg.switchMargin) choice = u.intent;
     }
-    if (u.setIntent(choice, source, now, probs, conf)) out.changed.push(id);
+    if (u.setIntent(choice, source, now, probs, conf)) out.changed.push(u.id);
     out.applied++;
   }
   return out;
@@ -120,6 +173,7 @@ export class Director {
     jevDecisions: 0,
     fallbackDecisions: 0,
     lowConfidence: 0,
+    rebalanced: 0,
     staleDropped: 0,
     lastBatch: 0,
     lastLatency: 0,
@@ -227,12 +281,18 @@ export class Director {
           res,
           map,
           now,
-          { gate: DIRECTOR.confidenceGate, minCommit: DIRECTOR.minCommit, switchMargin: DIRECTOR.switchMargin },
+          {
+            gate: DIRECTOR.confidenceGate,
+            minCommit: DIRECTOR.minCommit,
+            switchMargin: DIRECTOR.switchMargin,
+            maxShare: DIRECTOR.maxShare,
+          },
           res.mode === 'live' ? 'jev' : 'mock',
         );
         s.jevDecisions += r.applied;
         s.staleDropped += r.stale;
         s.lowConfidence += r.lowConfidence.length;
+        s.rebalanced += r.rebalanced;
         if (r.lowConfidence.length) this.runFallback(units.filter((u) => u.alive), world, r.lowConfidence, now);
         this.finishChanges(units, before, world);
       })
