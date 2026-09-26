@@ -35,6 +35,8 @@ export interface WorldSnapshot {
     strafing: boolean;
     recentlyDashed: boolean;
     dashReady?: boolean;
+    /** Player bolts have hit something in the last few seconds. */
+    landingShots?: boolean;
   };
   enemies: EnemySnapshot[];
   pillars: { x: number; z: number; r: number }[];

@@ -60,6 +60,7 @@ export class Game {
   private pickupGlow = new THREE.Color().setRGB(0.3, 1.6, 0.6);
   private frameHooks: ((dt: number) => void)[] = [];
   private overFor = 0;
+  private lastLandedAt = -99;
 
   constructor(container: HTMLElement, decide: DecideFn, useMock: boolean) {
     this.gfx = new Renderer(container);
@@ -120,6 +121,10 @@ export class Game {
         else if (this.state === 'paused') this.state = 'playing';
       }
     });
+    this.events.on('enemyHit', () => {
+      this.lastLandedAt = this.time;
+      this.autopilot.noteHit(this.time);
+    });
     this.events.on('enemyKilled', () => {
       if (this.pilot.enabled) this.director.trigger(); // retarget soon
     });
@@ -141,6 +146,7 @@ export class Game {
     if (this.pilot.enabled) {
       if (this.state === 'title' || this.state === 'over') this.newRun();
       if (this.state === 'paused') this.state = 'playing';
+      this.autopilot.reset(this.time);
       this.director.trigger();
     } else if (this.state === 'playing' && !this.input.locked) {
       this.state = 'paused'; // you need the mouse back to play
@@ -166,6 +172,7 @@ export class Game {
     this.combat.reset();
     this.waves.reset();
     this.director.reset();
+    this.autopilot.reset(this.time);
     this.cam.yaw = 0;
     this.cam.pitch = -0.12;
     this.cam.snap(this.player.pos);
@@ -201,6 +208,7 @@ export class Game {
         strafing: p.strafing,
         recentlyDashed: p.recentlyDashed,
         dashReady: p.dashCooldown <= 0,
+        landingShots: this.time - this.lastLandedAt < 3,
       },
       enemies: this.enemies.map((e) => ({
         id: e.id,
@@ -259,9 +267,11 @@ export class Game {
     const { dx, dy } = this.input.consumeMouse();
     const piloted = this.pilot.enabled && playing;
     if (playing && !piloted) this.cam.look(dx, dy);
-    const controls = piloted ? this.autopilot.update(dt) : manualControls(this.input, this.cam.yaw);
+    const controls = piloted ? this.autopilot.update(dt, t) : manualControls(this.input, this.cam.yaw);
+    // The autopilot shoots straight at its lead-corrected point instead of the crosshair ray.
+    const aim = piloted && this.autopilot.hasAim ? this.autopilot.aimPoint : this.cam.aimPoint;
 
-    this.player.update(dt, t, controls, this.cam.yaw, this.cam.aimPoint, ({ from, dir }) => {
+    this.player.update(dt, t, controls, this.cam.yaw, aim, ({ from, dir }) => {
       this.projectiles.fire('player', from, dir, PLAYER.bulletSpeed, PLAYER.bulletDamage);
       this.events.emit('shot', { x: from.x, y: from.y, z: from.z });
     });

@@ -18,7 +18,8 @@ export const PILOT_TARGET_Q = 'player_target';
 const PILOT_INSTRUCTIONS =
   'You are now piloting the PLAYER (state.player) against this squad. Goal: survive and kill every enemy. ' +
   'Use cover when hurt or when the weapon is overheated, dash only to escape point-blank danger, ' +
-  'circle-strafe ranged gunners, and never let flankers get behind you.';
+  'circle-strafe ranged gunners, never let flankers get behind you, ' +
+  'and if shots keep missing or the fight is stuck circling, advance on the target to finish it.';
 
 const MOVE_CRITERIA: Record<PlayerMove, string> = {
   advance: 'Push toward the target to finish it off',
@@ -96,6 +97,7 @@ export function buildRequest(world: WorldSnapshot, maxBatch: number, opts: Build
     player.dash = p.dashReady ? 'ready' : 'recharging';
     player.enemies_point_blank = enemyEntries.filter((e) => e.distance === 'point-blank').length > 0;
     player.enemies_behind = enemyEntries.some((e) => e.position === 'behind the player');
+    player.shots = p.landingShots ? 'landing' : 'missing (change approach)';
   }
 
   const state = {
