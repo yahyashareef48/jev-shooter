@@ -1,4 +1,5 @@
 import type { Events } from '../core/Events';
+import { isTyping } from '../ui/dom';
 
 /** Every sound is synthesised with WebAudio: no audio assets to load or license. */
 export class AudioSystem {
@@ -15,7 +16,7 @@ export class AudioSystem {
     addEventListener('mousedown', unlock);
     addEventListener('keydown', (e) => {
       unlock();
-      if (e.code === 'KeyM') this.toggleMute();
+      if (!isTyping(e) && e.code === 'KeyM') this.toggleMute();
     });
 
     events.on('shot', () => this.shot());

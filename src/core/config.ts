@@ -56,6 +56,30 @@ export const DIRECTOR = {
   pricePerMTok: 0.042,
 };
 
+/** Jev autopilot reflexes (player piloting). */
+export const PILOT = {
+  turnRate: 14,
+  aimGain: 25,
+  /** Stop firing above this heat unless the target is nearly dead. */
+  heatLimit: 0.88,
+  stallAfter: 3.5,
+  unstickFor: 2.5,
+  /** Go out of the way for an orb below this health fraction. */
+  orbUrgentHp: 0.4,
+  orbUrgentRange: 28,
+  /** Grab an orb in passing below this health fraction, if it is this close and unguarded. */
+  orbOpportunisticHp: 0.85,
+  orbOpportunisticRange: 9,
+  /** An enemy this close to an orb makes it "guarded". */
+  orbGuardRadius: 5,
+};
+
+export const PICKUPS = {
+  dropChance: 0.15,
+  heal: 20,
+  lifetime: 12,
+};
+
 export const COLORS = {
   chase: 0xff3b5c,
   flank: 0xffb020,

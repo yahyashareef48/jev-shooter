@@ -15,6 +15,13 @@ export function h<S extends string>(
   return el;
 }
 
+/** True when a key event is going into a text field, so game hotkeys should ignore it. */
+export function isTyping(e: Event): boolean {
+  const t = e.target as HTMLElement | null;
+  if (!t) return false;
+  return t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT';
+}
+
 export const fmt = {
   int: (n: number) => Math.round(n).toLocaleString('en-US'),
   ms: (n: number) => `${Math.round(n)} ms`,

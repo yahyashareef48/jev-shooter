@@ -12,7 +12,7 @@ interface MockEnemy {
 }
 
 interface MockState {
-  player?: { health?: string; weapon?: string; dash?: string; enemies_point_blank?: boolean };
+  player?: { health?: string; weapon?: string; dash?: string; enemies_point_blank?: boolean; health_orbs?: string };
   squad?: { alive?: number; chasing?: number; flanking?: number };
   enemies?: MockEnemy[];
 }
@@ -37,9 +37,15 @@ function mockPilot(id: string, criteria: Record<string, unknown>, state: MockSta
   if (id === 'player_move') {
     const hurt = pl.health === 'low' || pl.health === 'critical';
     const jammed = pl.weapon?.startsWith('overheated') ?? false;
-    const s: Record<string, number> = { advance: 0.4, strafe_left: 1, strafe_right: 1, retreat: 0.5, take_cover: 0.2, dash_away: -1 };
-    if (hurt || jammed) s.take_cover += 2.2;
-    if (pl.enemies_point_blank) (s.retreat += 1.2), (s.dash_away += pl.dash === 'ready' ? 2.5 : 0);
+    const base: Record<string, number> = { advance: 0.4, strafe_left: 1, strafe_right: 1, retreat: 0.5, take_cover: 0.2, dash_away: -1, grab_health: -0.5 };
+    const s: Record<string, number> = {};
+    for (const k of Object.keys(criteria)) s[k] = base[k] ?? 0; // only offer what was asked
+    if ((hurt || jammed) && 'take_cover' in s) s.take_cover += 2.2;
+    if (pl.enemies_point_blank) {
+      if ('retreat' in s) s.retreat += 1.2;
+      if ('dash_away' in s && pl.dash === 'ready') s.dash_away += 2.5;
+    }
+    if ('grab_health' in s && pl.health_orbs?.includes('safe')) s.grab_health += hurt ? 3 : pl.health_orbs.startsWith('close') ? 1 : 0;
     return softmaxAnswer(s);
   }
   // player_target: prefer weak, close, flanking enemies.

@@ -82,6 +82,12 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
     if (url !== '/api/decide') return next();
     if (req.method !== 'POST') return send(res, 405, { error: 'POST only' });
 
+    // A key/model set in the in-game settings arrives per request and wins over .env.
+    // This server only ever runs on the player's own machine (npm run dev / preview).
+    const headerKey = String(req.headers['x-jev-key'] ?? '').trim();
+    const apiKey = headerKey || opts.apiKey?.trim() || '';
+    const model = String(req.headers['x-jev-model'] ?? '').trim() || opts.model;
+
     let body: { mock?: boolean; request: { state: unknown; questions: Record<string, unknown> } };
     try {
       body = JSON.parse(await readBody(req));
@@ -92,7 +98,7 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
     if (invalid) return send(res, 422, { error: invalid });
 
     const started = Date.now();
-    if (body.mock || !hasKey) {
+    if (body.mock || !apiKey) {
       await new Promise((r) => setTimeout(r, 150 + Math.random() * 250));
       const mock = mockDecide(body.request);
       logBatch('mock', Object.keys(body.request.questions).length, 200, Date.now() - started, mock.answers);
@@ -104,8 +110,8 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
     try {
       const upstream = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/v1/systemone`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: opts.model, state: body.request.state, questions: body.request.questions }),
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, state: body.request.state, questions: body.request.questions }),
         signal: ctrl.signal,
       });
       const text = await upstream.text();
@@ -119,7 +125,7 @@ export function jevProxy(opts: JevProxyOptions): Plugin {
       return send(res, 200, {
         answers: data.answers ?? {},
         usage: data.usage,
-        model: data.model ?? opts.model,
+        model: data.model ?? model,
         latencyMs: Date.now() - started,
         mode: 'live',
       });

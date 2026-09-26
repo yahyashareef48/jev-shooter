@@ -162,7 +162,15 @@ export class Hud {
       const target = g.autopilot.target;
       this.pilotTag.replaceChildren(
         h('span.pt-name', {}, 'JEV PILOT'),
-        h('span.pt-move', {}, g.autopilot.unsticking ? 'advance (unstick)' : d.move.replace('_', ' ')),
+        h(
+          'span.pt-move',
+          {},
+          g.autopilot.unsticking
+            ? 'advance (unstick)'
+            : g.autopilot.orb && d.move !== 'grab_health'
+              ? `grab health (${g.autopilot.orbNeed})`
+              : d.move.replace('_', ' '),
+        ),
         h('span.pt-arrow', {}, '→'),
         h('span.pt-target', {}, target ? target.id : '—'),
         h(`span.pt-src.${d.source}`, {}, d.source === 'fallback' ? 'local' : d.source),

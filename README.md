@@ -6,15 +6,34 @@ The twist: the whole squad goes to Jev in **one batched call** per tick. Every l
 
 ## Run it
 
+This is a local app: clone it, run it, and bring your own [TypeSafe](https://typesafe.ai) key.
+
 ```bash
+git clone https://github.com/yahyashareef48/jev-shooter.git
+cd jev-shooter
 npm install
-cp .env.example .env      # paste your key into JEV_API_KEY
 npm run dev               # http://localhost:5173
 ```
 
-- If there is no key, the game runs in **mock mode**. A local stand-in returns the same response shape, so everything still works offline.
-- Add `?mock` to the URL to force mock mode, or press **J** in-game to toggle between live and mock.
-- The key is read **only** by the Vite dev server (`server/jevProxy.ts`). It is never `VITE_`-prefixed and never reaches the browser bundle.
+Then press **O** (or click **⚙ Settings**), go to **Jev**, paste your TypeSafe API key and click **Test connection**.
+
+- **Where the key lives:** in your browser's localStorage. It is sent only to your own local dev server (`server/jevProxy.ts`), which forwards it to TypeSafe. You can also put it in `.env` as `JEV_API_KEY` (see `.env.example`); a key set in the game overrides `.env`.
+- **Why there is a local server:** TypeSafe's API doesn't accept calls made directly from a web page (CORS), so the small Vite middleware relays them. Don't run the dev server with `--host` on a shared network while a key is set.
+- **No key?** The game runs in **mock mode**: a local stand-in returns the same response shape, so everything still works offline. Add `?mock` to the URL to force it, or press **J** to switch between live and mock.
+
+### Settings (O)
+
+Every tunable value is live-editable in-game, and changes apply straight away. Only values you change are saved (in this browser), each can be reset individually or per tab, and you can export or import them as JSON.
+
+| Tab | What you can change |
+|---|---|
+| **Jev** | Your key, model, live/mock, Test connection; how often calls go out, batch size, timeout, backoff |
+| **Enemy AI** | Confidence gate, hysteresis, squad-balance caps; the enemy **question text** and each type's **answer options** (chase / flank / retreat) |
+| **Player AI** | The pilot's **question text** and **move options**; aim/turn reflexes, stall breaker, health-orb thresholds |
+| **State** | Checkboxes for every field Jev sees (per enemy, player, squad), plus **Preview next request** to see the exact JSON |
+| **Gameplay** | Player and enemy stats, waves, health orbs, camera |
+
+Tip: turn on pilot mode (P), open Settings, and edit prompts or state fields while Jev plays itself. The AI panel (Tab) shows how the probabilities shift.
 
 | Script | What it does |
 |---|---|
@@ -34,6 +53,7 @@ npm run dev               # http://localhost:5173
 | Tab | toggle the AI Director panel |
 | J | live ↔ mock Jev |
 | P | **Jev pilots you**: it plays both sides (also `?pilot` in the URL) |
+| O | settings |
 | M | mute |
 | Esc | pause |
 
@@ -68,13 +88,14 @@ Browser                                             Vite dev server
 
 Press **P** (or open `/?pilot`) to let Jev fly the player too. It doesn't need a second call: two more questions ride along in the same batched request.
 
-- `player_move` picks one of `advance`, `strafe_left`, `strafe_right`, `retreat`, `take_cover` or `dash_away`.
+- `player_move` picks one of `advance`, `strafe_left`, `strafe_right`, `retreat`, `take_cover` or `dash_away`, plus `grab_health` whenever there's a health orb on the floor. The state tells Jev whether the nearest orb is close or far, and safe or guarded.
 - `player_target` picks which enemy to shoot. Its options are the live enemy ids, each with a short description.
 
 Local reflexes in `src/systems/Autopilot.ts` then do the frame-by-frame work:
 - Turn the camera toward the target at a human-like speed.
 - Fire only when lined up with a visible target, and stop short of overheating the gun.
-- Steer around pillars and away from the wall, dash once per `dash_away` decision, and grab health orbs when hurt.
+- Steer around pillars and away from the wall, dash once per `dash_away` decision.
+- Treat health orbs as a side quest, not the goal. When badly hurt it detours for one (urgent). When moderately hurt it grabs a close, unguarded orb in passing (opportunistic). At near-full health it ignores them rather than waste the heal. Once it commits to an orb it keeps going until it collects it, the orb expires, or an enemy starts guarding it.
 
 If Jev isn't sure, a local pilot brain (`src/ai/pilot.ts`) fills in. Release the mouse (Esc) to watch while Jev plays. When a piloted run ends, it restarts itself after a few seconds.
 
