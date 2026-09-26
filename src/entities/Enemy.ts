@@ -55,6 +55,8 @@ export class Enemy {
     this.group.add(this.visual.root);
     this.icon = new THREE.Sprite(intentIconMaterial('chase'));
     this.icon.scale.setScalar(0.55);
+    // Layer 1 is visible to the main camera but skipped by the floor reflection pass.
+    this.icon.layers.set(1);
     this.icon.position.y = this.stats.hoverY + this.stats.radius + 0.75;
     this.group.add(this.icon);
     this.color.copy(INTENT_COLOR.chase);

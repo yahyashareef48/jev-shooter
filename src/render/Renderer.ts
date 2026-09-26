@@ -36,6 +36,7 @@ export class Renderer {
     container.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(CAMERA.fov, innerWidth / innerHeight, 0.1, 400);
+    this.camera.layers.enable(1); // overlay-ish objects the floor reflection should not render
     this.scene.fog = new THREE.FogExp2(COLORS.fog, 0.012);
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);

@@ -5,7 +5,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { mockDecide } from './mockJev';
+import { mockDecide } from './mockJev.ts';
 
 export interface JevProxyOptions {
   apiKey?: string;

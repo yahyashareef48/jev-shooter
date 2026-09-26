@@ -1,5 +1,5 @@
 import { defineConfig, loadEnv } from 'vite';
-import { jevProxy } from './server/jevProxy';
+import { jevProxy } from './server/jevProxy.ts';
 
 export default defineConfig(({ mode }) => {
   // Empty prefix loads non-VITE_ vars too. They are used only here (server side) and never
