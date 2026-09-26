@@ -16,6 +16,9 @@ export interface EnemyContext {
   shoot: (from: THREE.Vector3, dir: THREE.Vector3, damage: number) => void;
 }
 
+/** Seconds a flanker circles before it gives up on the perfect angle and attacks. */
+const FLANK_COMMIT_AFTER = 4;
+
 let nextId = 1;
 export const resetEnemyIds = () => (nextId = 1);
 
@@ -119,7 +122,9 @@ export class Enemy {
       if (this.type === 'brute' && d < 9) speed = 11; // charge
     } else if (this.intent === 'flank') {
       const plan = flankTarget(this.pos, player, ctx.playerFacing, this.flankSide, s.flankRadius);
-      this.flankInPosition ||= plan.inPosition;
+      // If the player keeps turning to face us the flank point keeps moving; after a few seconds
+      // of circling, commit to the attack instead of orbiting forever.
+      this.flankInPosition ||= plan.inPosition || ctx.time - this.intentSince > FLANK_COMMIT_AFTER;
       if (this.flankInPosition && s.range === 0) {
         target = { x: player.x, z: player.z };
         speed *= this.type === 'drone' ? 1.5 : 1.3;

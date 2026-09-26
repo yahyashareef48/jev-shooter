@@ -12,12 +12,50 @@ interface MockEnemy {
 }
 
 interface MockState {
-  player?: { health?: string; weapon?: string };
+  player?: { health?: string; weapon?: string; dash?: string; enemies_point_blank?: boolean };
   squad?: { alive?: number; chasing?: number; flanking?: number };
   enemies?: MockEnemy[];
 }
 
 const TACTICS = ['chase', 'flank', 'retreat'] as const;
+
+function softmaxAnswer(scores: Record<string, number>, temperature = 1.6) {
+  const keys = Object.keys(scores);
+  for (const k of keys) scores[k] += (Math.random() - 0.5) * 0.6;
+  const max = Math.max(...keys.map((k) => scores[k]));
+  const exp = keys.map((k) => Math.exp((scores[k] - max) * temperature));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  const probabilities: Record<string, number> = {};
+  keys.forEach((k, i) => (probabilities[k] = +(exp[i] / sum).toFixed(3)));
+  const choice = keys.reduce((a, b) => (probabilities[b] > probabilities[a] ? b : a));
+  return { type: 'choice', choice, probabilities, confidence: probabilities[choice] };
+}
+
+/** Mock answers for the two questions asked when Jev pilots the player. */
+function mockPilot(id: string, criteria: Record<string, unknown>, state: MockState) {
+  const pl = state.player ?? {};
+  if (id === 'player_move') {
+    const hurt = pl.health === 'low' || pl.health === 'critical';
+    const jammed = pl.weapon?.startsWith('overheated') ?? false;
+    const s: Record<string, number> = { advance: 0.4, strafe_left: 1, strafe_right: 1, retreat: 0.5, take_cover: 0.2, dash_away: -1 };
+    if (hurt || jammed) s.take_cover += 2.2;
+    if (pl.enemies_point_blank) (s.retreat += 1.2), (s.dash_away += pl.dash === 'ready' ? 2.5 : 0);
+    return softmaxAnswer(s);
+  }
+  // player_target: prefer weak, close, flanking enemies.
+  const byId = new Map((state.enemies ?? []).map((e) => [e.id, e]));
+  const s: Record<string, number> = {};
+  for (const key of Object.keys(criteria)) {
+    const e = byId.get(key);
+    let v = 0;
+    if (e?.distance === 'point-blank' || e?.distance === 'close') v += 1.5;
+    if (e?.health === 'low' || e?.health === 'critical') v += 1;
+    if (e?.current_tactic === 'flank') v += 0.8;
+    if (e?.in_cover) v -= 1.5;
+    s[key] = v;
+  }
+  return softmaxAnswer(s, 2.2);
+}
 
 export function mockDecide(request: { state: unknown; questions: Record<string, unknown> }) {
   const state = (request.state ?? {}) as MockState;
@@ -30,6 +68,11 @@ export function mockDecide(request: { state: unknown; questions: Record<string, 
 
   const answers: Record<string, unknown> = {};
   for (const id of Object.keys(request.questions)) {
+    if (id.startsWith('player_')) {
+      const q = request.questions[id] as { criteria?: Record<string, unknown> };
+      answers[id] = mockPilot(id, q.criteria ?? {}, state);
+      continue;
+    }
     const e: MockEnemy = byId.get(id) ?? { id };
     const s = { chase: 1, flank: 0.6, retreat: 0.1 };
     if (e.health === 'critical') s.retreat += 2.6;

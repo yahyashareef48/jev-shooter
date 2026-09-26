@@ -9,6 +9,8 @@ const forceMock = new URLSearchParams(location.search).has('mock');
 const game = new Game(document.getElementById('app')!, decideViaProxy, forceMock || !status.hasKey);
 mountUI(game, status, document.getElementById('ui')!);
 game.start();
+// ?pilot starts a run with Jev flying the player too.
+if (new URLSearchParams(location.search).has('pilot')) game.togglePilot();
 
 addEventListener('mousedown', (e) => {
   if (e.button !== 0 || game.input.locked) return;
