@@ -81,6 +81,10 @@ export class Game {
       this.gfx.flashHurt(Math.min(1, damage / 15));
       this.cam.addTrauma(Math.min(0.6, damage / 30));
     });
+    document.addEventListener('pointerlockchange', () => {
+      if (this.input.locked && this.state === 'paused') this.state = 'playing';
+      else if (!this.input.locked && this.state === 'playing') this.state = 'paused';
+    });
     this.events.on('gameOver', () => {
       this.state = 'over';
       this.input.unlock();
