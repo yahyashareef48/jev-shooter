@@ -84,7 +84,7 @@ export class Renderer {
 
   render(dt: number) {
     this.hurt = Math.max(0, this.hurt - dt * 2.5);
-    const o = this.hurt * 0.006;
+    const o = this.hurt * 0.0032;
     this.chroma.offset.set(o, o * 0.6);
     this.vignette.darkness = 0.62 + this.hurt * 0.25;
     this.composer.render(dt);

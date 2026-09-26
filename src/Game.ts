@@ -6,6 +6,7 @@ import { Events } from './core/Events';
 import { Input } from './core/Input';
 import { angleBetween } from './core/math';
 import { Enemy, resetEnemyIds } from './entities/Enemy';
+import { INTENT_COLOR } from './entities/EnemyTypes';
 import { Pickups } from './entities/Pickup';
 import { Player } from './entities/Player';
 import { ProjectileSystem } from './entities/Projectile';
@@ -13,8 +14,10 @@ import { ThirdPersonCamera } from './entities/ThirdPersonCamera';
 import type { Glow } from './render/FloorMaterial';
 import { Renderer } from './render/Renderer';
 import { Sky } from './render/Sky';
+import { AudioSystem } from './systems/AudioSystem';
 import { resolveCollisions } from './systems/CollisionSystem';
 import { CombatSystem } from './systems/CombatSystem';
+import { FxSystem } from './systems/FxSystem';
 import { spawnPoint, WaveSystem } from './systems/WaveSystem';
 import { Arena } from './world/Arena';
 
@@ -36,6 +39,8 @@ export class Game {
   readonly waves: WaveSystem;
   readonly pickups = new Pickups();
   readonly director: Director;
+  readonly fx: FxSystem;
+  readonly audio: AudioSystem;
   enemies: Enemy[] = [];
   state: GameState = 'title';
   time = 0;
@@ -63,7 +68,10 @@ export class Game {
       (id, intent) => this.events.emit('intentChanged', { id, intent }),
       useMock,
     );
+    this.fx = new FxSystem(this.events, () => this.player.pos);
+    this.audio = new AudioSystem(this.events, () => this.player.pos);
     this.gfx.scene.add(
+      this.fx.group,
       this.sky.group,
       this.arena.group,
       this.player.group,
@@ -84,6 +92,12 @@ export class Game {
     document.addEventListener('pointerlockchange', () => {
       if (this.input.locked && this.state === 'paused') this.state = 'playing';
       else if (!this.input.locked && this.state === 'playing') this.state = 'paused';
+    });
+    this.events.on('intentChanged', ({ id, intent }) => {
+      const e = this.enemies.find((x) => x.id === id);
+      if (e && this.state === 'playing') {
+        this.fx.ring(new THREE.Vector3(e.pos.x, 0.06, e.pos.z), INTENT_COLOR[intent].clone().multiplyScalar(0.8), 2.2 + e.stats.radius, 0.45);
+      }
     });
     this.events.on('gameOver', () => {
       this.state = 'over';
@@ -171,6 +185,7 @@ export class Game {
     if (simulate) this.step(dt);
     else this.idle(rawDt);
 
+    this.fx.update(dt);
     this.arena.update(this.time);
     this.sky.update(this.time);
     this.updateGlows();
