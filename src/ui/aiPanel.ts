@@ -1,7 +1,7 @@
 import { INTENTS } from '../ai/types';
-import type { ProxyStatus } from '../ai/jevClient';
 import type { Game } from '../Game';
-import { fmt, h } from './dom';
+import { session } from '../settings/session';
+import { fmt, h, isTyping } from './dom';
 
 const TYPE_GLYPH = { drone: '◆', gunner: '■', brute: '⬢' } as const;
 
@@ -23,10 +23,7 @@ export class AiPanel {
   private latencies: number[] = [];
   private lastCalls = -1;
 
-  constructor(
-    private game: Game,
-    private status: ProxyStatus,
-  ) {
+  constructor(private game: Game) {
     const legend = h(
       'div.legend',
       {},
@@ -46,6 +43,7 @@ export class AiPanel {
       h('div.ai-keys', {}, h('kbd', {}, 'Tab'), ' panel  ', h('kbd', {}, 'J'), ' live / mock  ', h('kbd', {}, 'P'), ' Jev pilot'),
     );
     addEventListener('keydown', (e) => {
+      if (isTyping(e)) return;
       if (e.code === 'Tab') this.toggle();
       if (e.code === 'KeyJ') this.toggleMock();
     });
@@ -58,7 +56,7 @@ export class AiPanel {
 
   private toggleMock() {
     const d = this.game.director;
-    if (!this.status.hasKey) return; // no key: mock is the only option
+    if (!session.hasKey()) return; // no key: mock is the only option
     d.useMock = !d.useMock;
   }
 
@@ -102,7 +100,7 @@ export class AiPanel {
     const cell = (label: string, value: string, cls = '') => h(`div.cell${cls ? '.' + cls : ''}`, {}, h('span', {}, label), h('b', {}, value));
     this.stats.replaceChildren(
       cell('mode', mode.text, mode.cls),
-      cell('model', s.lastMode === 'mock' ? 'mock-jev' : this.status.model),
+      cell('model', s.lastMode === 'mock' ? 'mock-jev' : session.effectiveModel()),
       cell('batch', `${s.lastBatch} q`),
       cell('latency', s.lastLatency ? `${fmt.ms(s.lastLatency)} · avg ${Math.round(s.avgLatency)}` : '—'),
       cell('calls', `${fmt.int(s.calls)}${s.errors ? ` · ${s.errors} err` : ''}`),

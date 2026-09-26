@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Director, type DecideFn } from './ai/director';
 import { Pilot } from './ai/pilot';
 import type { EnemyType, WorldSnapshot } from './ai/types';
-import { COLORS, PLAYER } from './core/config';
+import { COLORS, PICKUPS, PLAYER } from './core/config';
 import { Events } from './core/Events';
 import { Input } from './core/Input';
 import { angleBetween } from './core/math';
@@ -21,12 +21,11 @@ import { resolveCollisions } from './systems/CollisionSystem';
 import { CombatSystem } from './systems/CombatSystem';
 import { FxSystem } from './systems/FxSystem';
 import { spawnPoint, WaveSystem } from './systems/WaveSystem';
+import { isTyping } from './ui/dom';
 import { Arena } from './world/Arena';
 
 export type GameState = 'title' | 'playing' | 'paused' | 'over';
 
-const PICKUP_CHANCE = 0.15;
-const PICKUP_HEAL = 20;
 /** Seconds on the game-over screen before a Jev-piloted run restarts itself. */
 const PILOT_RESTART_DELAY = 7;
 
@@ -114,6 +113,7 @@ export class Game {
       else if (!this.input.locked && this.state === 'playing' && !this.pilot.enabled) this.state = 'paused';
     });
     addEventListener('keydown', (e) => {
+      if (isTyping(e)) return;
       if (e.code === 'KeyP') this.togglePilot();
       // Esc only reaches us when the pointer is already free (spectating a Jev-piloted run).
       if (e.code === 'Escape' && !this.input.locked && this.pilot.enabled) {
@@ -219,6 +219,7 @@ export class Game {
         intent: e.intent,
       })),
       pillars: this.arena.pillars,
+      orbs: this.pickups.positions().map((o) => ({ x: o.x, z: o.z })),
     };
   }
 
@@ -311,7 +312,7 @@ export class Game {
       this.arena.floor.ripple(e.pos.x, e.pos.z, e.type === 'brute' ? 1.5 : 0.8, t);
       this.cam.addTrauma(e.type === 'brute' ? 0.5 : 0.22);
       this.hitStop = e.type === 'brute' ? 0.08 : 0.04;
-      if (Math.random() < PICKUP_CHANCE || e.type === 'brute') this.pickups.spawn(e.pos.x, e.pos.z);
+      if (Math.random() < PICKUPS.dropChance || e.type === 'brute') this.pickups.spawn(e.pos.x, e.pos.z);
       this.removeEnemy(e);
     }
     if (killed.length) this.enemies = this.enemies.filter((e) => e.alive);
@@ -320,8 +321,8 @@ export class Game {
 
     const got = this.pickups.update(dt, t, this.player.pos);
     for (let i = 0; i < got; i++) {
-      this.player.heal(PICKUP_HEAL);
-      this.events.emit('pickup', { heal: PICKUP_HEAL });
+      this.player.heal(PICKUPS.heal);
+      this.events.emit('pickup', { heal: PICKUPS.heal });
     }
 
     this.cam.update(

@@ -1,5 +1,5 @@
-import type { ProxyStatus } from '../ai/jevClient';
 import type { Game } from '../Game';
+import { session } from '../settings/session';
 import { fmt, h } from './dom';
 
 const CONTROLS: [string, string][] = [
@@ -10,6 +10,7 @@ const CONTROLS: [string, string][] = [
   ['Tab', 'AI panel'],
   ['J', 'live ↔ mock'],
   ['P', 'Jev pilots you'],
+  ['O', 'settings'],
   ['M', 'mute'],
   ['Esc', 'pause'],
 ];
@@ -21,14 +22,22 @@ export class Screens {
   private pause: HTMLElement;
   private over = h('div.screen.over');
   private shownOver = false;
+  private modeLine = h('div.mode-line');
+  private modeText = '';
 
   constructor(
     private game: Game,
-    status: ProxyStatus,
+    openSettings: () => void,
   ) {
-    const modeLine = status.hasKey
-      ? h('div.mode-line.live', {}, h('i'), `LIVE · ${status.model}`)
-      : h('div.mode-line.mock', {}, h('i'), 'MOCK MODE · add JEV_API_KEY to .env to go live');
+    const modeLine = this.modeLine;
+    const settingsBtn = () => {
+      const b = h('button.settings-btn', {}, '⚙ Settings ', h('kbd', {}, 'O'));
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); // don't start the run
+        openSettings();
+      });
+      return b;
+    };
 
     this.title = h(
       'div.screen.title',
@@ -47,14 +56,26 @@ export class Screens {
       modeLine,
       h('div.cta', {}, 'CLICK TO DEPLOY'),
       h('div.pilot-hint', {}, 'or press ', h('kbd', {}, 'P'), ' to let Jev pilot you and watch it fight itself'),
+      settingsBtn(),
       h('div.controls', {}, ...CONTROLS.map(([k, v]) => h('div.ctl', {}, h('kbd', {}, k), h('span', {}, v)))),
     );
-    this.pause = h('div.screen.pause', {}, h('div.big', {}, 'PAUSED'), h('div.cta', {}, 'CLICK TO RESUME'));
+    this.pause = h('div.screen.pause', {}, h('div.big', {}, 'PAUSED'), h('div.cta', {}, 'CLICK TO RESUME'), settingsBtn());
     this.root.append(this.title, this.pause, this.over);
   }
 
   update() {
     const g = this.game;
+    const live = !g.director.useMock && session.hasKey();
+    const text = live
+      ? `LIVE · ${session.effectiveModel()}`
+      : session.hasKey()
+        ? 'MOCK MODE · press J to go live'
+        : 'MOCK MODE · add your Jev key in Settings (O) to go live';
+    if (text !== this.modeText) {
+      this.modeText = text;
+      this.modeLine.className = `mode-line ${live ? 'live' : 'mock'}`;
+      this.modeLine.replaceChildren(h('i'), text);
+    }
     this.title.classList.toggle('show', g.state === 'title');
     this.pause.classList.toggle('show', g.state === 'paused');
     const over = g.state === 'over' && !g.player.alive;

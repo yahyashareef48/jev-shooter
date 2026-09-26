@@ -6,7 +6,7 @@ export type Intent = (typeof INTENTS)[number];
 export type EnemyType = 'drone' | 'gunner' | 'brute';
 
 /** Movement tactics Jev can pick when it pilots the player. */
-export const PLAYER_MOVES = ['advance', 'strafe_left', 'strafe_right', 'retreat', 'take_cover', 'dash_away'] as const;
+export const PLAYER_MOVES = ['advance', 'strafe_left', 'strafe_right', 'retreat', 'take_cover', 'dash_away', 'grab_health'] as const;
 export type PlayerMove = (typeof PLAYER_MOVES)[number];
 
 /** Who made an enemy's current decision. */
@@ -40,6 +40,8 @@ export interface WorldSnapshot {
   };
   enemies: EnemySnapshot[];
   pillars: { x: number; z: number; r: number }[];
+  /** Health orbs on the floor (only needed when Jev pilots the player). */
+  orbs?: XZ[];
 }
 
 // ---- Jev wire types (https://docs.typesafe.ai/api) ----

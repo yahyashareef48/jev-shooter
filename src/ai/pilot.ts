@@ -1,6 +1,7 @@
 // Jev autopilot for the player. Jev picks the tactic (how to move, whom to shoot) in the same
 // batched call as the squad; local reflexes do the frame-by-frame aiming, firing and steering.
 
+import { PICKUPS, PILOT } from '../core/config';
 import { add, clamp, dist, hasLineOfSight, len, norm, scale, sub, type Circle, type XZ } from '../core/math';
 import { bestCover } from '../world/Cover';
 import { avoidPillars } from './steering';
@@ -14,6 +15,40 @@ export interface PilotDecision {
   moveConfidence: number | null;
   targetConfidence: number | null;
   since: number;
+}
+
+export type OrbNeed = 'urgent' | 'opportunistic' | 'requested';
+
+/**
+ * Should the player go for a health orb, and which one? Orbs are never the main goal:
+ * - urgent: badly hurt, so a longer detour is worth it (still avoiding guarded orbs unless very close)
+ * - opportunistic: moderately hurt, and an unguarded orb is right there
+ * - requested: Jev picked grab_health, so accept any reasonably close, unguarded orb
+ * Returns null when no orb is worth it (including when the heal would mostly be wasted).
+ */
+export function chooseOrb(
+  self: XZ,
+  hp: number,
+  maxHp: number,
+  orbs: readonly XZ[],
+  enemies: readonly XZ[],
+  requested = false,
+): { orb: XZ; need: OrbNeed } | null {
+  if (!orbs.length || maxHp - hp < PICKUPS.heal * 0.6) return null;
+  const frac = hp / maxHp;
+  let best: { orb: XZ; need: OrbNeed; cost: number } | null = null;
+  for (const orb of orbs) {
+    const d = dist(orb, self);
+    const guarded = enemies.some((e) => dist(e, orb) < PILOT.orbGuardRadius);
+    let need: OrbNeed | null = null;
+    if (frac < PILOT.orbUrgentHp && d < PILOT.orbUrgentRange && (!guarded || d < 8)) need = 'urgent';
+    else if (requested && d < PILOT.orbUrgentRange * 0.8 && !guarded) need = 'requested';
+    else if (frac < PILOT.orbOpportunisticHp && d < PILOT.orbOpportunisticRange && !guarded) need = 'opportunistic';
+    if (!need) continue;
+    const cost = d * (guarded ? 2 : 1);
+    if (!best || cost < best.cost) best = { orb, need, cost };
+  }
+  return best && { orb: best.orb, need: best.need };
 }
 
 /** Local stand-in used when Jev is unavailable or unsure. Pure, so it is unit-testable. */
@@ -36,10 +71,13 @@ export function fallbackPilot(world: WorldSnapshot, strafeSign: 1 | -1): { move:
       targetId = e.id;
     }
   }
+  const orb = chooseOrb(p.pos, p.hp, p.maxHp, world.orbs ?? [], world.enemies.map((e) => e.pos));
   let move: PlayerMove;
   if (pointBlank >= 2 && p.dashReady) move = 'dash_away';
+  else if (orb?.need === 'urgent') move = 'grab_health';
   else if (hpFrac < 0.35 || p.overheated) move = 'take_cover';
   else if (nearest < 5) move = 'retreat';
+  else if (orb) move = 'grab_health';
   else move = strafeSign > 0 ? 'strafe_right' : 'strafe_left';
   return { move, targetId };
 }
@@ -59,6 +97,7 @@ export function pilotMoveVector(
   threats: readonly Threat[],
   pillars: readonly Circle[],
   arenaRadius: number,
+  orb: XZ | null = null,
 ): XZ {
   // Threat centre, weighted towards whoever is closest.
   let wx = 0;
@@ -92,6 +131,9 @@ export function pilotMoveVector(
     case 'retreat':
     case 'dash_away':
       v = away;
+      break;
+    case 'grab_health':
+      v = orb ? norm(sub(orb, self)) : away;
       break;
     case 'take_cover': {
       const c = bestCover(self, centroid, pillars);

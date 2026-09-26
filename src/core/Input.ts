@@ -1,5 +1,7 @@
 // Keyboard + pointer-lock mouse. Mouse deltas accumulate between frames and are consumed once.
 
+import { isTyping } from '../ui/dom';
+
 export class Input {
   private down = new Set<string>();
   private pressed = new Set<string>();
@@ -9,6 +11,7 @@ export class Input {
 
   constructor(private target: HTMLElement) {
     addEventListener('keydown', (e) => {
+      if (isTyping(e)) return;
       if (e.code === 'Tab') e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);

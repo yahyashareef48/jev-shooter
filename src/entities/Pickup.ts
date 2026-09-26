@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PICKUPS } from '../core/config';
 
 const geo = new THREE.OctahedronGeometry(0.32, 0);
 const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(0.4, 3, 1.2) });
@@ -17,7 +18,7 @@ export class Pickups {
     g.add(ring);
     g.position.set(x, 0.8, z);
     this.group.add(g);
-    this.items.push({ mesh: g, life: 12 });
+    this.items.push({ mesh: g, life: PICKUPS.lifetime });
   }
 
   /** Returns number of orbs collected this frame. */

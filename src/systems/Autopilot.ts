@@ -1,17 +1,12 @@
 import * as THREE from 'three';
-import { pilotMoveVector, type Pilot } from '../ai/pilot';
+import { chooseOrb, pilotMoveVector, type OrbNeed, type Pilot } from '../ai/pilot';
 import type { PlayerMove } from '../ai/types';
-import { ARENA, PLAYER } from '../core/config';
+import { ARENA, PILOT, PLAYER } from '../core/config';
 import { hasLineOfSight, type Circle } from '../core/math';
 import type { Enemy } from '../entities/Enemy';
 import type { Player, PlayerControls } from '../entities/Player';
 import type { ThirdPersonCamera } from '../entities/ThirdPersonCamera';
 
-const TURN_RATE = 14; // rad/s cap: fast, but still visibly turns rather than teleporting
-const AIM_GAIN = 25; // proportional correction on top of the feed-forward
-/** No damage dealt for this long while engaging → the current tactic isn't working. */
-const STALL_AFTER = 3.5;
-const UNSTICK_FOR = 2.5;
 
 /**
  * Turns the pilot's current Jev decision (move tactic + target) into per-frame controls.
@@ -25,6 +20,9 @@ export class Autopilot {
   hasAim = false;
   /** Set while the stall breaker has overridden Jev's move. */
   unsticking = false;
+  /** The health orb we're committed to, and why. */
+  orb: THREE.Vector3 | null = null;
+  orbNeed: OrbNeed | null = null;
   private lastHitAt = 0;
   private unstickUntil = -1;
   private prevWant: { yaw: number; pitch: number } | null = null;
@@ -54,6 +52,8 @@ export class Autopilot {
     this.unstickUntil = -1;
     this.prevWant = null;
     this.target = this.prevTarget = null;
+    this.orb = null;
+    this.orbNeed = null;
   }
 
   update(dt: number, now: number): PlayerControls {
@@ -107,8 +107,8 @@ export class Autopilot {
 
       const yawErr = Math.atan2(Math.sin(wantYaw - this.cam.yaw), Math.cos(wantYaw - this.cam.yaw));
       const pitchErr = wantPitch - this.cam.pitch;
-      const maxStep = TURN_RATE * dt;
-      const k = Math.min(1, AIM_GAIN * dt);
+      const maxStep = PILOT.turnRate * dt;
+      const k = Math.min(1, PILOT.aimGain * dt);
       this.cam.yaw += THREE.MathUtils.clamp(this.ffYaw * dt + yawErr * k, -maxStep, maxStep);
       this.cam.pitch += THREE.MathUtils.clamp(this.ffPitch * dt + pitchErr * k, -maxStep, maxStep);
 
@@ -118,7 +118,7 @@ export class Autopilot {
       this.ray.direction.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
       const onTarget = this.ray.distanceToPoint(this.aimPoint) < target.stats.radius * 1.4;
       const visible = hasLineOfSight(p.pos, target.pos, this.pillars);
-      const heatOk = p.heat < 0.88 || target.hpFrac < 0.3;
+      const heatOk = p.heat < PILOT.heatLimit || target.hpFrac < 0.3;
       fire = onTarget && visible && !p.overheated && heatOk && target.pos.distanceTo(p.pos) < 55;
     } else {
       this.prevWant = null;
@@ -127,39 +127,60 @@ export class Autopilot {
 
     // ---- stall breaker: if nothing has landed for a while, stop dancing and close in ----
     const hurt = p.hp < PLAYER.maxHp * 0.4;
-    if (target && !hurt && now - this.lastHitAt > STALL_AFTER && now > this.unstickUntil) {
-      this.unstickUntil = now + UNSTICK_FOR;
+    if (target && !hurt && now - this.lastHitAt > PILOT.stallAfter && now > this.unstickUntil) {
+      this.unstickUntil = now + PILOT.unstickFor;
       this.lastHitAt = now;
     }
     this.unsticking = now < this.unstickUntil && !!target;
-    const move: PlayerMove = this.unsticking ? 'advance' : d.move;
+    let move: PlayerMove = this.unsticking ? 'advance' : d.move;
+
+    // ---- health orbs: a side quest, never the main goal ----
+    this.updateOrb(enemies, move === 'grab_health');
+    const dashing = move === 'dash_away';
+    if (this.orb && !dashing && (this.orbNeed !== 'opportunistic' || move !== 'take_cover')) move = 'grab_health';
+    else if (move === 'grab_health' && !this.orb) move = 'strafe_right'; // nothing worth grabbing
 
     // ---- move ----
     const threats = enemies.map((e) => ({ pos: e.pos }));
-    let wish = enemies.length
-      ? pilotMoveVector(move, p.pos, target ? target.pos : null, threats, this.pillars, ARENA.radius)
+    let wish = enemies.length || this.orb
+      ? pilotMoveVector(move, p.pos, target ? target.pos : null, threats, this.pillars, ARENA.radius, this.orb)
       : { x: -p.pos.x * 0.05, z: -p.pos.z * 0.05 }; // drift back to the centre between waves
 
     // A blocked shot is worse than a bad angle: step sideways out from behind the pillar.
-    if (target && !hasLineOfSight(p.pos, target.pos, this.pillars) && move !== 'take_cover') {
+    if (target && !hasLineOfSight(p.pos, target.pos, this.pillars) && move !== 'take_cover' && move !== 'grab_health') {
       const tx = target.pos.x - p.pos.x;
       const tz = target.pos.z - p.pos.z;
       const l = Math.hypot(tx, tz) || 1;
       wish = { x: wish.x * 0.5 + (-tz / l) * 0.8, z: wish.z * 0.5 + (tx / l) * 0.8 };
     }
 
-    // Grab a health orb on the way when hurt.
-    if (p.hp < 60 && move !== 'dash_away') {
-      const orb = this.pickups().find((o) => Math.hypot(o.x - p.pos.x, o.z - p.pos.z) < 14);
-      if (orb) {
-        const ox = orb.x - p.pos.x;
-        const oz = orb.z - p.pos.z;
-        const l = Math.hypot(ox, oz) || 1;
-        wish = { x: wish.x * 0.4 + ox / l, z: wish.z * 0.4 + oz / l };
-      }
-    }
 
     const dash = p.dashCooldown <= 0 && this.pilot.consumeDash();
     return { move: wish, fire, dash };
+  }
+
+  /**
+   * Keep or pick an orb to go for. Once committed we stick with it until it is collected,
+   * expires or becomes guarded, so the pilot doesn't dither between orb and fight.
+   */
+  private updateOrb(enemies: readonly Enemy[], requested: boolean) {
+    const p = this.player;
+    const orbs = this.pickups();
+    const enemyPos = enemies.map((e) => e.pos);
+    if (this.orb) {
+      const still = orbs.includes(this.orb);
+      const guarded = enemyPos.some((e) => e.distanceTo(this.orb!) < PILOT.orbGuardRadius);
+      const topped = PLAYER.maxHp - p.hp < 5;
+      // Health kept dropping since we committed: the side quest is now the priority.
+      if (p.hp / PLAYER.maxHp < PILOT.orbUrgentHp) this.orbNeed = 'urgent';
+      if (still && !topped && (!guarded || this.orbNeed === 'urgent')) return;
+      this.orb = null;
+      this.orbNeed = null;
+    }
+    const pick = chooseOrb(p.pos, p.hp, PLAYER.maxHp, orbs, enemyPos, requested);
+    if (pick) {
+      this.orb = pick.orb as THREE.Vector3;
+      this.orbNeed = pick.need;
+    }
   }
 }
